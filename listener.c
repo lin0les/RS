@@ -31,6 +31,8 @@ void print_help() {
     printf("  dir              - List files and directories\n");
     printf("  cd <path>        - Change directory\n");
     printf("  pwd              - Print working directory\n");
+    printf("  cat <file>       - Read file content\n");
+    printf("  type <file>      - Read file content (Windows style)\n");
     printf("  sysinfo          - Get system information\n");
     printf("  exit/quit        - Close connection\n");
     printf("  help             - Show this help\n");
