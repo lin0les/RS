@@ -1,5 +1,5 @@
 /*
- * Linux Listener for CTF/OSEE Preparation
+ * Linux Listener for CTF/OSEE Preparation - Version 3
  * Compile: gcc -o listener listener.c
  * Usage: ./listener [port]
  */
@@ -13,7 +13,7 @@
 #include <arpa/inet.h>
 #include <signal.h>
 
-#define BUFFER_SIZE 8192
+#define BUFFER_SIZE 16384
 #define DEFAULT_PORT 4444
 
 int server_fd = -1;
@@ -26,10 +26,22 @@ void cleanup(int sig) {
     exit(0);
 }
 
+void print_help() {
+    printf("\n=== Available Commands ===\n");
+    printf("  dir              - List files and directories\n");
+    printf("  cd <path>        - Change directory\n");
+    printf("  pwd              - Print working directory\n");
+    printf("  sysinfo          - Get system information\n");
+    printf("  exit/quit        - Close connection\n");
+    printf("  help             - Show this help\n");
+    printf("==========================\n\n");
+}
+
 void handle_client(int client_fd, struct sockaddr_in client_addr) {
     char buffer[BUFFER_SIZE];
     char command[256];
     ssize_t bytes_received;
+    int total_received;
     
     printf("[+] Connection from %s:%d\n", 
            inet_ntoa(client_addr.sin_addr), 
@@ -48,6 +60,8 @@ void handle_client(int client_fd, struct sockaddr_in client_addr) {
         printf("%s\n", buffer);
     }
     
+    print_help();
+    
     while (1) {
         // Get command from user
         printf("remote> ");
@@ -59,6 +73,12 @@ void handle_client(int client_fd, struct sockaddr_in client_addr) {
         
         // Remove newline
         command[strcspn(command, "\n")] = 0;
+        
+        // Check for local help command
+        if (strcmp(command, "help") == 0) {
+            print_help();
+            continue;
+        }
         
         // Check for exit command
         if (strcmp(command, "exit") == 0 || strcmp(command, "quit") == 0) {
@@ -74,16 +94,37 @@ void handle_client(int client_fd, struct sockaddr_in client_addr) {
             break;
         }
         
-        // Receive response
+        // Receive response (may be large for sysinfo)
         memset(buffer, 0, BUFFER_SIZE);
-        bytes_received = recv(client_fd, buffer, BUFFER_SIZE - 1, 0);
+        total_received = 0;
         
-        if (bytes_received <= 0) {
-            printf("[-] Connection lost\n");
-            break;
+        while (1) {
+            bytes_received = recv(client_fd, buffer + total_received, 
+                                 BUFFER_SIZE - total_received - 1, 0);
+            
+            if (bytes_received <= 0) {
+                printf("[-] Connection lost\n");
+                close(client_fd);
+                return;
+            }
+            
+            total_received += bytes_received;
+            
+            // Check if we received the end marker
+            if (total_received >= 3) {
+                char *end_marker = strstr(buffer, "<<<END>>>");
+                if (end_marker != NULL) {
+                    *end_marker = '\0';
+                    break;
+                }
+            }
+            
+            // Safety check
+            if (total_received >= BUFFER_SIZE - 1) {
+                break;
+            }
         }
         
-        buffer[bytes_received] = '\0';
         printf("%s", buffer);
     }
     
@@ -104,7 +145,8 @@ int main(int argc, char *argv[]) {
     }
     
     printf("========================================\n");
-    printf("Linux Listener - File Browser\n");
+    printf("Linux Listener - Version 3\n");
+    printf("File Browser + System Info\n");
     printf("========================================\n");
     
     server_fd = socket(AF_INET, SOCK_STREAM, 0);

